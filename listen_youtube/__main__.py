@@ -11,7 +11,7 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.client.default import DefaultBotProperties
 from aiogram.exceptions import TelegramAPIError
 from aiogram.filters import Command, CommandStart
-from aiogram.types import FSInputFile, Message
+from aiogram.types import BotCommand, FSInputFile, Message
 
 from . import audio
 from .config import load
@@ -40,7 +40,7 @@ async def start(message: Message) -> None:
     if not allowed(message):
         await message.answer(f"Это личный бот. Твой id: {message.from_user.id}")
         return
-    await message.answer("Пришли ссылку на YouTube-видео — верну звук.")
+    await message.answer("Пришли ссылку на YouTube-видео — верну звук.\n/check — проверить cookies YouTube.")
 
 
 CHECK_TZ = ZoneInfo("Europe/Warsaw")
@@ -173,6 +173,13 @@ async def main() -> None:
     if cfg.cookies_file:
         log.info("using cookies: %s", cfg.cookies_file)
     bot = Bot(cfg.bot_token, default=DefaultBotProperties(parse_mode="HTML"))
+    try:
+        await bot.set_my_commands([
+            BotCommand(command="check", description="Проверить cookies YouTube"),
+            BotCommand(command="start", description="Как пользоваться"),
+        ])
+    except TelegramAPIError as e:
+        log.warning("set_my_commands failed: %s", e)
     checker = asyncio.create_task(daily_cookie_check(bot))
     try:
         await dp.start_polling(bot)
