@@ -57,7 +57,7 @@ class Status:
         except TelegramAPIError as e:
             log.warning("status edit failed: %s", e)
 
-    async def follow(self, latest: dict, every: float = 3.0) -> None:
+    async def follow(self, latest: dict, every: float = 2.0) -> None:
         """Mirror latest["text"] into the message; Telegram tolerates ~1 edit/s per chat, stay well below."""
         while True:
             await asyncio.sleep(every)
@@ -79,13 +79,13 @@ async def on_link(message: Message, bot: Bot) -> None:
         await message.answer("Не вижу ссылки на YouTube.")
         return
 
-    status = Status(await message.reply("В очереди…" if job_lock.locked() else "Скачиваю…"))
+    status = Status(await message.reply("В очереди…" if job_lock.locked() else "Получаю данные о видео…"))
     async with job_lock:
-        await status.set("Скачиваю…")
+        await status.set("Получаю данные о видео…")
         work = cfg.work_dir / uuid.uuid4().hex
         try:
             # The worker thread only writes the latest line; the ticker edits the message at a safe rate.
-            latest = {"text": "Скачиваю…"}
+            latest = {"text": "Получаю данные о видео…"}
             ticker = asyncio.create_task(status.follow(latest))
             try:
                 res = await asyncio.to_thread(audio.download, cfg, url, work, lambda t: latest.__setitem__("text", t))
