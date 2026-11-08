@@ -7,7 +7,7 @@ import uuid
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.client.default import DefaultBotProperties
-from aiogram.exceptions import TelegramBadRequest
+from aiogram.exceptions import TelegramAPIError
 from aiogram.filters import CommandStart
 from aiogram.types import FSInputFile, Message
 
@@ -54,13 +54,19 @@ class Status:
         try:
             await self.message.edit_text(text)
             self.text = text
-        except TelegramBadRequest as e:
+        except TelegramAPIError as e:
             log.warning("status edit failed: %s", e)
+
+    async def follow(self, latest: dict, every: float = 3.0) -> None:
+        """Mirror latest["text"] into the message; Telegram tolerates ~1 edit/s per chat, stay well below."""
+        while True:
+            await asyncio.sleep(every)
+            await self.set(latest["text"])
 
     async def delete(self) -> None:
         try:
             await self.message.delete()
-        except TelegramBadRequest as e:
+        except TelegramAPIError as e:
             log.warning("status delete failed: %s", e)
 
 
@@ -78,12 +84,20 @@ async def on_link(message: Message, bot: Bot) -> None:
         await status.set("Скачиваю…")
         work = cfg.work_dir / uuid.uuid4().hex
         try:
-            res = await asyncio.to_thread(audio.download, cfg, url, work)
-            await status.set(f"Отправляю ({len(res.parts)} шт.)…" if len(res.parts) > 1 else "Отправляю…")
+            # The worker thread only writes the latest line; the ticker edits the message at a safe rate.
+            latest = {"text": "Скачиваю…"}
+            ticker = asyncio.create_task(status.follow(latest))
+            try:
+                res = await asyncio.to_thread(audio.download, cfg, url, work, lambda t: latest.__setitem__("text", t))
+            finally:
+                ticker.cancel()
+            await status.set(f"{res.title}\nОтправляю…")
             thumb = FSInputFile(res.thumbnail) if res.thumbnail else None
             total = len(res.parts)
             for i, part in enumerate(res.parts, 1):
                 suffix = f" ({i}/{total})" if total > 1 else ""
+                if total > 1:
+                    await status.set(f"{res.title}\nОтправляю часть {i}/{total}…")
                 caption = f'<a href="{html.escape(res.url)}">{html.escape(res.title)}</a>{suffix}\n{fmt_duration(res.duration)}'
                 if res.bitrate_kbps:
                     caption += f" · {res.bitrate_kbps} kbps"
