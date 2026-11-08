@@ -1,0 +1,21 @@
+[Unit]
+Description=Listen YouTube Telegram bot (YouTube link -> audio)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/opt/listen-youtube
+EnvironmentFile=/opt/listen-youtube/.env
+ExecStart=/opt/listen-youtube/.venv/bin/python -m listen_youtube
+Restart=always
+RestartSec=5
+Nice=10
+CPUQuota=200%
+MemoryMax=2G
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

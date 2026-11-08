@@ -1,0 +1,9 @@
+[Unit]
+Description=Update yt-dlp for listen-youtube bot
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/opt/listen-youtube
+ExecStart=/opt/listen-youtube/.venv/bin/pip install -q -U "yt-dlp[default]"
+ExecStartPost=+/usr/bin/systemctl restart listen-youtube
