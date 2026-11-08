@@ -120,6 +120,32 @@ def _make_thumbnail(out_dir: Path) -> Path | None:
     return dst if dst.exists() and dst.stat().st_size < 200_000 else None
 
 
+HEALTHCHECK_URL = "https://www.youtube.com/watch?v=jNQXAC9IVRw"  # "Me at the zoo": 19 s, never removed
+
+
+def check_access(cfg: Config) -> tuple[bool, str]:
+    """Blocking. Resolve formats of a known video with the current cookies, download nothing.
+
+    Returns (ok, human-readable verdict). Also refreshes the cookie file: yt-dlp writes back
+    whatever cookies Google rotated, which keeps the session alive.
+    """
+    if not cfg.cookies_file:
+        return False, "Файл cookies не найден (YTDLP_COOKIES)."
+    opts = _ydl_opts(cfg, cfg.work_dir, _noop) | {"skip_download": True, "writethumbnail": False}
+    try:
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(HEALTHCHECK_URL, download=False)
+    except yt_dlp.utils.DownloadError as e:
+        msg = str(e)
+        if "Sign in to confirm" in msg:
+            return False, "Cookies протухли: YouTube снова просит подтвердить, что я не бот. Нужно выгрузить свежие."
+        return False, f"Проверка не прошла, но причина не в cookies: {msg.removeprefix('ERROR: ')[:300]}"
+    audio_formats = [f for f in info.get("formats") or [] if f.get("acodec") not in (None, "none")]
+    if not audio_formats:
+        return False, "YouTube отдал данные, но без аудиопотоков: возможно, пора обновлять yt-dlp или cookies."
+    return True, "Cookies в порядке, YouTube отдаёт аудио."
+
+
 def download(cfg: Config, url: str, out_dir: Path, progress: Progress = _noop) -> AudioResult:
     """Blocking: run it in a thread. `progress` gets human-readable status lines."""
     out_dir.mkdir(parents=True, exist_ok=True)

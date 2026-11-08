@@ -23,6 +23,9 @@ Server `ssh oracle-arm` (ubuntu-arm-01), `/opt/listen-youtube`, systemd unit `li
     deploy/deploy.sh --install   # first-time setup (apt, deno, venv, units)
     ssh oracle-arm journalctl -fu listen-youtube
 
+Cookies are checked daily at 10:00 Europe/Warsaw (a 19 s test video, nothing downloaded); on failure the bot
+messages everyone in `ALLOWED_IDS`. Manual check: `/check` in the chat.
+
 Timer `listen-youtube-update.timer` updates yt-dlp daily at ~04:30 and restarts the bot.
 
 ## If YouTube starts asking "Sign in to confirm you're not a bot"

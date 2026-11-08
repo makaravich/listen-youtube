@@ -4,11 +4,13 @@ import html
 import logging
 import shutil
 import uuid
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.client.default import DefaultBotProperties
 from aiogram.exceptions import TelegramAPIError
-from aiogram.filters import CommandStart
+from aiogram.filters import Command, CommandStart
 from aiogram.types import FSInputFile, Message
 
 from . import audio
@@ -39,6 +41,48 @@ async def start(message: Message) -> None:
         await message.answer(f"Это личный бот. Твой id: {message.from_user.id}")
         return
     await message.answer("Пришли ссылку на YouTube-видео — верну звук.")
+
+
+CHECK_TZ = ZoneInfo("Europe/Warsaw")
+CHECK_HOUR = 10
+
+
+async def run_check() -> tuple[bool, str]:
+    # Under the job lock: yt-dlp rewrites the cookie file, don't race a running download.
+    async with job_lock:
+        return await asyncio.to_thread(audio.check_access, cfg)
+
+
+@dp.message(Command("check"))
+async def check(message: Message) -> None:
+    if not allowed(message):
+        return
+    status = await message.reply("Проверяю cookies…")
+    ok, verdict = await run_check()
+    await status.edit_text(("✅ " if ok else "❌ ") + verdict)
+
+
+async def daily_cookie_check(bot: Bot) -> None:
+    """Every day at CHECK_HOUR (Warsaw): warn the owners if YouTube stopped accepting the cookies."""
+    while True:
+        now = datetime.now(CHECK_TZ)
+        nxt = now.replace(hour=CHECK_HOUR, minute=0, second=0, microsecond=0)
+        if nxt <= now:
+            nxt += timedelta(days=1)
+        await asyncio.sleep((nxt - now).total_seconds())
+        try:
+            ok, verdict = await run_check()
+        except Exception:
+            log.exception("daily cookie check crashed")
+            ok, verdict = False, "Ежедневная проверка cookies упала, подробности в логе."
+        log.info("daily cookie check: ok=%s %s", ok, verdict)
+        if ok:
+            continue
+        for uid in cfg.allowed_ids:
+            try:
+                await bot.send_message(uid, f"⚠️ {verdict}\nПосле выгрузки — /check.")
+            except TelegramAPIError as e:
+                log.warning("cannot notify %s: %s", uid, e)
 
 
 class Status:
@@ -129,7 +173,11 @@ async def main() -> None:
     if cfg.cookies_file:
         log.info("using cookies: %s", cfg.cookies_file)
     bot = Bot(cfg.bot_token, default=DefaultBotProperties(parse_mode="HTML"))
-    await dp.start_polling(bot)
+    checker = asyncio.create_task(daily_cookie_check(bot))
+    try:
+        await dp.start_polling(bot)
+    finally:
+        checker.cancel()
 
 
 if __name__ == "__main__":
