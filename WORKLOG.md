@@ -18,3 +18,9 @@
 - Next step: nothing required. Untested yet: very long video (> ~2 h, split into parts), Shorts, music.youtube links.
 - Blockers: cookies expire (weeks to months) -> the daily check warns; re-export in incognito, drop the file into
   the project, `deploy/deploy.sh --cookies`.
+
+## 2026-11-18
+- Done: разбор сбоя 17.11 — Telegram Bot API лежал ~20:19–21:25 UTC, sendAudio упал с Gateway Timeout. Добавлены повторы отправки (30/60/120/300 с) на 5xx/таймауты/flood control; ошибки теперь отдельным сообщением-ответом (с уведомлением), а не правкой статуса.
+- In progress: —
+- Next step: убедиться на реальной ссылке, что всё работает как раньше.
+- Blockers: —
