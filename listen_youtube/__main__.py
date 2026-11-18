@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.client.default import DefaultBotProperties
-from aiogram.exceptions import TelegramAPIError
+from aiogram.exceptions import TelegramAPIError, TelegramNetworkError, TelegramRetryAfter, TelegramServerError
 from aiogram.filters import Command, CommandStart
 from aiogram.types import BotCommand, FSInputFile, Message
 
@@ -27,6 +27,42 @@ job_lock = asyncio.Lock()
 
 def allowed(message: Message) -> bool:
     return not cfg.allowed_ids or (message.from_user and message.from_user.id in cfg.allowed_ids)
+
+
+# Pauses between upload attempts when Telegram itself is failing (5xx / timeouts).
+SEND_RETRY_DELAYS = (30, 60, 120, 300)
+
+
+async def with_retries(what: str, call):
+    """Run an API call, retrying on transient Telegram outages.
+
+    A 5xx/timeout on upload may still mean the file got through, so a rare duplicate is possible;
+    losing the audio entirely is the worse outcome for this bot.
+    """
+    for attempt, delay in enumerate((*SEND_RETRY_DELAYS, None), 1):
+        try:
+            return await call()
+        except TelegramRetryAfter as e:
+            if delay is None:
+                raise
+            delay = max(delay, e.retry_after)
+            log.warning("%s: flood control, attempt %d, retry in %ss", what, attempt, delay)
+        except (TelegramServerError, TelegramNetworkError) as e:
+            if delay is None:
+                raise
+            log.warning("%s: %s, attempt %d, retry in %ss", what, e, attempt, delay)
+        await asyncio.sleep(delay)
+
+
+async def report_error(message: Message, status: "Status", text: str) -> None:
+    """Send the error as a new message (edits don't notify) and drop the status line."""
+    try:
+        await with_retries("error reply", lambda: message.reply(text))
+    except TelegramAPIError as e:
+        log.error("could not deliver error message: %s", e)
+        await status.set(text)
+        return
+    await status.delete()
 
 
 def fmt_duration(sec: int) -> str:
@@ -145,7 +181,7 @@ async def on_link(message: Message, bot: Bot) -> None:
                 caption = f'<a href="{html.escape(res.url)}">{html.escape(res.title)}</a>{suffix}\n{fmt_duration(res.duration)}'
                 if res.bitrate_kbps:
                     caption += f" · {res.bitrate_kbps} kbps"
-                await bot.send_audio(
+                await with_retries(f"send_audio part {i}/{total}", lambda: bot.send_audio(
                     message.chat.id,
                     FSInputFile(part, filename=f"{res.title[:60].replace('/', '_')}{suffix}.m4a"),
                     caption=caption,
@@ -155,13 +191,13 @@ async def on_link(message: Message, bot: Bot) -> None:
                     thumbnail=thumb,
                     reply_to_message_id=message.message_id,
                     request_timeout=600,
-                )
+                ))
             await status.delete()
         except audio.DownloadError as e:
-            await status.set(f"❌ {e}")
+            await report_error(message, status, f"❌ {e}")
         except Exception:
             log.exception("failed on %s", url)
-            await status.set("❌ Что-то сломалось, подробности в логе.")
+            await report_error(message, status, "❌ Что-то сломалось, подробности в логе.")
         finally:
             shutil.rmtree(work, ignore_errors=True)
 
